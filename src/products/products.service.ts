@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Product } from './products.model';
 
 @Injectable()
@@ -6,7 +6,7 @@ export class ProductsService {
   product: Product[] = [];
 
   insertProduct(title: string, desc: string, price: number) {
-    const id = new Date().toISOString();
+    const id = Math.floor(Math.random() * Date.now()).toString();
     const newProduct = new Product(id, title, desc, price);
     this.product.push(newProduct);
     return id;
@@ -14,5 +14,15 @@ export class ProductsService {
 
   getProducts() {
     return [...this.product];
+  }
+
+  getProduct(prodId: string) {
+    const product = this.product.find((prod) => prod.id === prodId);
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    return { ...product };
   }
 }
