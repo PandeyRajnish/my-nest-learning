@@ -92,7 +92,7 @@ flowchart TB
 | 02 | [Modules](#02-modules-) | ✅ |
 | 03 | [Controllers & HTTP methods](#03-controllers--http-methods-) | ✅ |
 | 04 | [Providers, services & DI](#04-providers-services--di-) | ✅ |
-| 05 | [Request data (`@Param` `@Query` `@Req` `@Res` `@HttpCode`)](#05-request-data-) | ✅ |
+| 05 | [Request data (`@Param` `@Query` `@Req` `@Res` `@HttpCode` `HttpStatus`)](#05-request-data-) | ✅ |
 | 06 | [Exceptions (throwing)](#06-exceptions-throwing-) | ✅ |
 | 07 | [Middleware](#07-middleware-) | 📝 |
 | 08 | [Guards](#08-guards-) | 📝 |
@@ -353,16 +353,18 @@ removeProduct(@Param('id') id: string) {
 
 ### `@HttpCode()` — Nest sets the status
 
-When you `return` data, Nest picks the status. Override it with `@HttpCode(n)` (or `HttpStatus.NO_CONTENT`).
+When you `return` data, Nest picks the status. Override it with `@HttpCode(HttpStatus.NO_CONTENT)` (same as `204`).
 
 | Method | Nest default | Common override |
 |--------|--------------|-----------------|
-| GET, PUT, PATCH, DELETE | **200** OK | DELETE often `@HttpCode(204)` (no body) |
-| POST | **201** Created | `@HttpCode(200)` if you don't want 201 |
+| GET, PUT, PATCH, DELETE | **200** `HttpStatus.OK` | DELETE often `@HttpCode(HttpStatus.NO_CONTENT)` |
+| POST | **201** `HttpStatus.CREATED` | `@HttpCode(HttpStatus.OK)` if you don't want 201 |
 
 ```ts
+import { HttpCode, HttpStatus } from '@nestjs/common';
+
 @Get()
-@HttpCode(204)
+@HttpCode(HttpStatus.NO_CONTENT) // 204
 noContent() {
   return; // Nest sends 204, empty body
 }
@@ -623,7 +625,7 @@ import { Request, Response } from 'express';       // error with emitDecoratorMe
 
 ```ts
 @Get()
-@HttpCode(204)                 // Nest would send 204 — but never gets to
+@HttpCode(HttpStatus.OK)        // Nest would send 200 — but never gets to
 getAll(@Res() res: Response) {
   return res.status(200).json({
     message:
@@ -632,7 +634,7 @@ getAll(@Res() res: Response) {
 }
 ```
 
-Client sees **200**, not 204.
+Client sees **200** from `res.status(200)`, not from `@HttpCode`. (`HttpStatus.OK` **is** 200 — here Express still wins because `@Res()` owns the reply.)
 
 ```mermaid
 flowchart TB
@@ -676,24 +678,72 @@ passthrough(@Res({ passthrough: true }) res: Response) {
 
 **Status cheat sheet** (interview):
 
-| Code | Name | Typical use |
-|------|------|-------------|
-| 200 | OK | GET / PUT / PATCH success |
-| 201 | Created | POST success (Nest default for POST) |
-| 204 | No Content | DELETE / action with empty body |
-| 400 | Bad Request | Validation failed (pipes) |
-| 401 | Unauthorized | Not logged in (guards) |
-| 403 | Forbidden | Logged in but not allowed |
-| 404 | Not Found | `NotFoundException` |
-| 500 | Internal Server Error | Unhandled throw |
+| Code | `HttpStatus` | Typical use |
+|------|--------------|-------------|
+| 200 | `OK` | GET / PUT / PATCH success |
+| 201 | `CREATED` | POST success (Nest default for POST) |
+| 204 | `NO_CONTENT` | DELETE / action with empty body |
+| 400 | `BAD_REQUEST` | Validation failed (pipes) |
+| 401 | `UNAUTHORIZED` | Not logged in (guards) |
+| 403 | `FORBIDDEN` | Logged in but not allowed |
+| 404 | `NOT_FOUND` | `NotFoundException` |
+| 500 | `INTERNAL_SERVER_ERROR` | Unhandled throw |
 
-Prefer `HttpStatus` over magic numbers:
+---
+
+### `HttpStatus` enum
+
+**What:** Named constants for HTTP codes in `@nestjs/common`. `HttpStatus.OK === 200`. Prefer names over magic numbers in `@HttpCode`, `res.status()`, and `HttpException`.
+
+**Interview:** It is a **numeric TypeScript enum**. Same number the spec uses — just readable. Works anywhere a status `number` is expected. Exceptions like `NotFoundException` already map to `HttpStatus.NOT_FOUND` (404).
 
 ```ts
 import { HttpCode, HttpStatus } from '@nestjs/common';
 
-@HttpCode(HttpStatus.NO_CONTENT)  // 204
+HttpStatus.OK === 200;                    // true
+@HttpCode(HttpStatus.OK)                  // Nest
+res.status(HttpStatus.OK).json({ ok: true }); // Express
+throw new HttpException('Nope', HttpStatus.FORBIDDEN); // 403
 ```
+
+**This project:** `@HttpCode(HttpStatus.OK)` on `getAll`.
+
+**Families (first digit):**
+
+```
+1xx  informational    HttpStatus.CONTINUE              100
+2xx  success          HttpStatus.OK / CREATED / NO_CONTENT
+3xx  redirect         HttpStatus.MOVED_PERMANENTLY     301
+4xx  client error     HttpStatus.BAD_REQUEST / NOT_FOUND
+5xx  server error     HttpStatus.INTERNAL_SERVER_ERROR 500
+```
+
+```mermaid
+flowchart LR
+  Enum["HttpStatus.CREATED"] -->|"=== 201"| Num[201]
+  Num --> Nest["@HttpCode(HttpStatus.CREATED)"]
+  Num --> Express["res.status(HttpStatus.CREATED)"]
+  Num --> Throw["HttpException(..., HttpStatus.CREATED)"]
+```
+
+| Family | Enum members you will actually use |
+|--------|-----------------------------------|
+| **2xx success** | `OK` 200 · `CREATED` 201 · `ACCEPTED` 202 · `NO_CONTENT` 204 · `PARTIAL_CONTENT` 206 |
+| **3xx redirect** | `MOVED_PERMANENTLY` 301 · `FOUND` 302 · `SEE_OTHER` 303 · `NOT_MODIFIED` 304 · `TEMPORARY_REDIRECT` 307 · `PERMANENT_REDIRECT` 308 |
+| **4xx client** | `BAD_REQUEST` 400 · `UNAUTHORIZED` 401 · `FORBIDDEN` 403 · `NOT_FOUND` 404 · `METHOD_NOT_ALLOWED` 405 · `CONFLICT` 409 · `GONE` 410 · `PAYLOAD_TOO_LARGE` 413 · `UNPROCESSABLE_ENTITY` 422 · `TOO_MANY_REQUESTS` 429 |
+| **5xx server** | `INTERNAL_SERVER_ERROR` 500 · `NOT_IMPLEMENTED` 501 · `BAD_GATEWAY` 502 · `SERVICE_UNAVAILABLE` 503 · `GATEWAY_TIMEOUT` 504 |
+| Fun fact | `I_AM_A_TEAPOT` 418 (RFC joke — rarely used in real APIs) |
+
+Full list: `node_modules/@nestjs/common/enums/http-status.enum.d.ts` (also `CONTINUE` 100, `PROCESSING` 102, `LOCKED` 423, …).
+
+**`@HttpCode(HttpStatus.X)` vs `res.status(HttpStatus.X)`** — same enum, same rule as before: Nest vs Express. Enum does not change who wins.
+
+```ts
+@HttpCode(HttpStatus.NO_CONTENT)           // Nest sends 204
+res.status(HttpStatus.OK).json({ ok: true }) // Express sends 200
+```
+
+**One-liner:** `HttpStatus` = named HTTP codes (`OK` = 200). Use it instead of raw numbers; it does not override `@Res()`.
 
 **One-liner:** `@HttpCode` = Nest status. `res.status()` = Express status. `@Res()` without passthrough → `res.status()` wins and `@HttpCode` is hidden.
 
@@ -701,7 +751,7 @@ import { HttpCode, HttpStatus } from '@nestjs/common';
 
 - — `@Req()` + `@Res()` in `AppController.fetchReq`
 - — `@Query('name')` + `@Query('age')` with `?` and `&` in `fetchQuery`
-- — `@HttpCode(204)` vs `res.status(200)` in `getAll` — HttpCode hidden because of `@Res()`
+- — `@HttpCode(HttpStatus.OK)` vs `res.status(200)` in `getAll` — enum name, still hidden because of `@Res()`
 
 ---
 
@@ -902,7 +952,9 @@ Add a row when you finish a unit.
 | `@Res()` vs `return`? | `return` → Nest sends JSON. `@Res()` → you must `res.send` / `res.json`. |
 | What is `@HttpCode()`? | Nest success status when Nest sends the reply (`return`). |
 | `@HttpCode` vs `res.status()`? | Nest vs Express. `@Res()` without passthrough → `res.status()` wins; `@HttpCode` is ignored. |
-| Nest default status codes? | POST → 201. GET/PUT/PATCH/DELETE → 200. |
+| What is `HttpStatus`? | Numeric enum in `@nestjs/common`. `HttpStatus.OK === 200`. Use names, not magic numbers. |
+| `HttpStatus` vs `@HttpCode`? | Enum = the number. `@HttpCode` / `res.status()` = where you apply it. |
+| Nest default status codes? | POST → 201 `CREATED`. GET/PUT/PATCH/DELETE → 200 `OK`. |
 | Why `import type { Request }` / `Response`? | Type-only; required with `emitDecoratorMetadata` + `isolatedModules`. |
 | Request pipeline order? | Middleware → Guards → Interceptors → Pipes → Controller → Interceptors → Filters (on error). |
 | Middleware vs Guard? | 📝 fill in unit 07/08 |

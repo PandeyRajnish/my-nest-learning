@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  HttpStatus,
   Param,
   Query,
   Req,
@@ -40,7 +41,7 @@ export class AppController {
   }
 
   @Get()
-  @HttpCode(204)
+  @HttpCode(HttpStatus.OK)
   getAll(@Res() res: Response) {
     return res.status(200).json({
       message:
