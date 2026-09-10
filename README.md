@@ -92,7 +92,7 @@ flowchart TB
 | 02 | [Modules](#02-modules-) | ✅ |
 | 03 | [Controllers & HTTP methods](#03-controllers--http-methods-) | ✅ |
 | 04 | [Providers, services & DI](#04-providers-services--di-) | ✅ |
-| 05 | [Request data (`@Param` `@Body` `@Req`)](#05-request-data-) | ✅ |
+| 05 | [Request data (`@Param` `@Body` `@Req` `@Res`)](#05-request-data-) | ✅ |
 | 06 | [Exceptions (throwing)](#06-exceptions-throwing-) | ✅ |
 | 07 | [Middleware](#07-middleware-) | 📝 |
 | 08 | [Guards](#08-guards-) | 📝 |
@@ -418,18 +418,12 @@ export class Product {
 **Interview:** Prefer `@Param` / `@Body` / `@Query` for one field. `@Req()` is the escape hatch. Type as Express `Request` (or Fastify's type if you switch).
 
 ```ts
-import { Controller, Get, Req } from '@nestjs/common';
-import type { Request } from 'express';
-
-@Controller()
-export class AppController {
-  @Get(':id')
-  fetchReq(@Req() req: Request) {
-    const { id } = req.params;
-    const queryParams = req.query;
-    const userAgent = req.headers['user-agent'];
-    return { id, queryParams, userAgent };
-  }
+@Get(':id')
+fetchReq(@Req() req: Request) {
+  const { id } = req.params;
+  const queryParams = req.query;
+  const userAgent = req.headers['user-agent'];
+  return { id, queryParams, userAgent }; // Nest sends JSON for you
 }
 ```
 
@@ -449,16 +443,84 @@ flowchart LR
 | Headers | `req.headers['user-agent']` | `@Headers('user-agent')` |
 | Body | `req.body` | `@Body()` |
 
-**TS gotcha:** `isolatedModules` + `emitDecoratorMetadata` → types in decorated signatures need `import type`:
+---
+
+### `@Res()` and `Response`
+
+**What:** Raw Express `Response`. You take over sending the HTTP response (`res.status().send()`, `res.json()`, cookies, HTML, streams).
+
+**Interview:** `@Req()` reads the incoming request. `@Res()` writes the outgoing response. By default Nest **stops auto-sending** your `return` value — you **must** call `res.send` / `res.json` / `res.end` yourself. Prefer returning from the handler unless you need Express APIs (HTML, cookies, streaming).
+
+**This project** (`src/app.controller.ts`):
 
 ```ts
-import type { Request } from 'express';  // correct
-import { Request } from 'express';       // error
+import { Controller, Get, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
+
+@Controller()
+export class AppController {
+  @Get(':id')
+  fetchReq(@Req() req: Request, @Res() res: Response) {
+    const { id } = req.params;
+    const queryParams = req.query;
+    const userAgent = req.headers['user-agent'];
+
+    return res.status(500).send(`
+      <script>
+        console.log('ID: ${id}');
+      </script>
+    `); // you sent it — Nest will not wrap this as JSON
+  }
+}
+```
+
+```mermaid
+flowchart LR
+  Handler["Controller handler"] -->|"@Req()"| Req["Express Request"]
+  Handler -->|"@Res()"| Res["Express Response"]
+  Req --> Read["params / query / headers"]
+  Res --> Write["res.status().send() / json()"]
+```
+
+| | `@Req()` | `@Res()` |
+|--|----------|----------|
+| Object | Incoming **request** | Outgoing **response** |
+| Typical use | Read params, query, headers | Custom status, HTML, cookies, streams |
+| Nest auto-JSON? | Yes, if you `return` data | **No** (unless `passthrough: true`) |
+| You must | — | Call `res.send` / `res.json` / `res.end` |
+
+**Gotcha — who sends the response?**
+
+```ts
+@Get()
+standard() {
+  return { ok: true };           // Nest sends 200 JSON
+}
+
+@Get()
+libraryMode(@Res() res: Response) {
+  res.json({ ok: true });        // you send it; a bare `return { ok: true }` is ignored
+}
+
+@Get()
+both(@Res({ passthrough: true }) res: Response) {
+  res.setHeader('X-Custom', '1');
+  return { ok: true };           // Nest still sends the return value
+}
+```
+
+**One-liner:** `@Res()` = Express `Response`. Default = you own the reply. `@Res({ passthrough: true })` = set headers/cookies, Nest still serializes `return`.
+
+**TS gotcha:** same as `Request` — type-only import:
+
+```ts
+import type { Request, Response } from 'express';  // correct
+import { Request, Response } from 'express';       // error with emitDecoratorMetadata + isolatedModules
 ```
 
 ### Practice notes
 
-- —
+- — `@Req()` + `@Res()` in `AppController.fetchReq`
 
 ---
 
@@ -651,9 +713,12 @@ Add a row when you finish a unit.
 | Default provider scope? | Singleton. |
 | How does Nest know the route? | `@Controller('products')` + `@Get(':id')` → `GET /products/:id`. |
 | Missing product? | `NotFoundException` → 404. |
-| What is `@Req()`? | Raw Express `Request`. |
+| What is `@Req()`? | Raw Express `Request` (read incoming data). |
+| What is `@Res()`? | Raw Express `Response` (you send the reply). |
 | `@Req()` vs `@Param` / `@Query`? | Specific = one slice; `@Req()` = whole request. |
-| Why `import type { Request }`? | Type-only; required with `emitDecoratorMetadata` + `isolatedModules`. |
+| `@Res()` vs `return`? | `return` → Nest sends JSON. `@Res()` → you must `res.send` / `res.json`. |
+| What is `passthrough: true`? | `@Res({ passthrough: true })` — touch `res` (headers/cookies) and still `return` data for Nest. |
+| Why `import type { Request }` / `Response`? | Type-only; required with `emitDecoratorMetadata` + `isolatedModules`. |
 | Request pipeline order? | Middleware → Guards → Interceptors → Pipes → Controller → Interceptors → Filters (on error). |
 | Middleware vs Guard? | 📝 fill in unit 07/08 |
 | Guard vs Interceptor? | 📝 fill in unit 08/09 |
@@ -673,7 +738,7 @@ Add a row when you finish a unit.
               │
     @Get @Post @Put @Patch @Delete
               │
-         @Param / @Body / @Req()
+         @Param / @Body / @Req() / @Res()
               │
           Service methods
               │
