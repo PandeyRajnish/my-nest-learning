@@ -92,7 +92,7 @@ flowchart TB
 | 02 | [Modules](#02-modules-) | ✅ |
 | 03 | [Controllers & HTTP methods](#03-controllers--http-methods-) | ✅ |
 | 04 | [Providers, services & DI](#04-providers-services--di-) | ✅ |
-| 05 | [Request data (`@Param` `@Body` `@Query` `@Req` `@Res`)](#05-request-data-) | ✅ |
+| 05 | [Request data (`@Param` `@Query` `@Req` `@Res` `@HttpCode`)](#05-request-data-) | ✅ |
 | 06 | [Exceptions (throwing)](#06-exceptions-throwing-) | ✅ |
 | 07 | [Middleware](#07-middleware-) | 📝 |
 | 08 | [Guards](#08-guards-) | 📝 |
@@ -212,7 +212,7 @@ getProduct(@Param('id') id: string) {}  // param
 
 | Decorator | Does this | Practice unit |
 |-----------|-----------|---------------|
-| `@HttpCode(201)` | Set success status. | 03 |
+| `@HttpCode(201)` | Set success status (ignored if `@Res()` sends the reply). | 03 / 05 |
 | `@Header(...)` | Set a response header. | 03 |
 | `@Redirect(...)` | Redirect. | 03 |
 | `@UseGuards(...)` | Auth / roles before handler. | 08 |
@@ -350,6 +350,25 @@ removeProduct(@Param('id') id: string) {
   return { message: 'Product removed successfully' };
 }
 ```
+
+### `@HttpCode()` — Nest sets the status
+
+When you `return` data, Nest picks the status. Override it with `@HttpCode(n)` (or `HttpStatus.NO_CONTENT`).
+
+| Method | Nest default | Common override |
+|--------|--------------|-----------------|
+| GET, PUT, PATCH, DELETE | **200** OK | DELETE often `@HttpCode(204)` (no body) |
+| POST | **201** Created | `@HttpCode(200)` if you don't want 201 |
+
+```ts
+@Get()
+@HttpCode(204)
+noContent() {
+  return; // Nest sends 204, empty body
+}
+```
+
+If you also inject `@Res()` and call `res.status(...)`, **that wins** — see [unit 05](#httpcode-vs-resstatus).
 
 ### Practice notes
 
@@ -592,10 +611,97 @@ import type { Request, Response } from 'express';  // correct
 import { Request, Response } from 'express';       // error with emitDecoratorMetadata + isolatedModules
 ```
 
+---
+
+### `@HttpCode()` vs `res.status()`
+
+**What:** Two ways to set the **HTTP status**. `@HttpCode` is Nest (used when Nest sends the response). `res.status()` is Express (used when you injected `@Res()`).
+
+**Interview:** `@HttpCode` only applies if Nest is still in charge of the reply. Inject `@Res()` without `passthrough` → Nest steps aside → `@HttpCode` is **ignored**. The number that actually goes on the wire is `res.status(...)`.
+
+**This project** (`AppController.getAll`):
+
+```ts
+@Get()
+@HttpCode(204)                 // Nest would send 204 — but never gets to
+getAll(@Res() res: Response) {
+  return res.status(200).json({
+    message:
+      'HttpCode status code will be hidden here because of Response object',
+  });
+}
+```
+
+Client sees **200**, not 204.
+
+```mermaid
+flowchart TB
+  subgraph nestMode["Nest sends the reply"]
+    A["return data"] --> B["@HttpCode(204) or default 200/201"]
+  end
+  subgraph expressMode["@Res() — you send the reply"]
+    C["res.status(200).json(...)"] --> D["@HttpCode is ignored"]
+  end
+```
+
+| | `@HttpCode(204)` | `res.status(200)` |
+|--|------------------|-------------------|
+| Who | Nest | Express `Response` |
+| When it runs | You `return` (no `@Res()`, or `passthrough: true`) | You injected `@Res()` and call `res.status` / `send` / `json` |
+| If both present | Lost — `@Res()` owns the response | **Wins** (this project's `getAll`) |
+| Body | 204 = no content | Whatever you `json()` / `send()` |
+
+**Who wins?**
+
+```ts
+@Get()
+@HttpCode(204)
+onlyNest() {
+  return;                              // → 204
+}
+
+@Get()
+@HttpCode(204)
+overridden(@Res() res: Response) {
+  return res.status(200).json({ ok: true }); // → 200  (@HttpCode hidden)
+}
+
+@Get()
+@HttpCode(204)
+passthrough(@Res({ passthrough: true }) res: Response) {
+  res.setHeader('X-Custom', '1');
+  return;                              // → 204  (Nest still sends)
+}
+```
+
+**Status cheat sheet** (interview):
+
+| Code | Name | Typical use |
+|------|------|-------------|
+| 200 | OK | GET / PUT / PATCH success |
+| 201 | Created | POST success (Nest default for POST) |
+| 204 | No Content | DELETE / action with empty body |
+| 400 | Bad Request | Validation failed (pipes) |
+| 401 | Unauthorized | Not logged in (guards) |
+| 403 | Forbidden | Logged in but not allowed |
+| 404 | Not Found | `NotFoundException` |
+| 500 | Internal Server Error | Unhandled throw |
+
+Prefer `HttpStatus` over magic numbers:
+
+```ts
+import { HttpCode, HttpStatus } from '@nestjs/common';
+
+@HttpCode(HttpStatus.NO_CONTENT)  // 204
+```
+
+**One-liner:** `@HttpCode` = Nest status. `res.status()` = Express status. `@Res()` without passthrough → `res.status()` wins and `@HttpCode` is hidden.
+
 ### Practice notes
 
 - — `@Req()` + `@Res()` in `AppController.fetchReq`
 - — `@Query('name')` + `@Query('age')` with `?` and `&` in `fetchQuery`
+- — `@HttpCode(204)` vs `res.status(200)` in `getAll` — HttpCode hidden because of `@Res()`
 
 ---
 
@@ -794,7 +900,9 @@ Add a row when you finish a unit.
 | What is `@Res()`? | Raw Express `Response` (you send the reply). |
 | `@Req()` vs `@Param` / `@Query`? | Specific = one slice; `@Req()` = whole request. |
 | `@Res()` vs `return`? | `return` → Nest sends JSON. `@Res()` → you must `res.send` / `res.json`. |
-| What is `passthrough: true`? | `@Res({ passthrough: true })` — touch `res` (headers/cookies) and still `return` data for Nest. |
+| What is `@HttpCode()`? | Nest success status when Nest sends the reply (`return`). |
+| `@HttpCode` vs `res.status()`? | Nest vs Express. `@Res()` without passthrough → `res.status()` wins; `@HttpCode` is ignored. |
+| Nest default status codes? | POST → 201. GET/PUT/PATCH/DELETE → 200. |
 | Why `import type { Request }` / `Response`? | Type-only; required with `emitDecoratorMetadata` + `isolatedModules`. |
 | Request pipeline order? | Middleware → Guards → Interceptors → Pipes → Controller → Interceptors → Filters (on error). |
 | Middleware vs Guard? | 📝 fill in unit 07/08 |

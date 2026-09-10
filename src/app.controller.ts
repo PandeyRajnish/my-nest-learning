@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 
 @Controller()
@@ -29,5 +37,14 @@ export class AppController {
       Name: `${name}`,
       Age: `${age}`,
     };
+  }
+
+  @Get()
+  @HttpCode(204)
+  getAll(@Res() res: Response) {
+    return res.status(200).json({
+      message:
+        'HttpCode status code will be hidded here because of Response object',
+    });
   }
 }
