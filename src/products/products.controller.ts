@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { Product } from './products.model';
 
@@ -37,5 +46,11 @@ export class ProductsController {
   partialUpdate(@Param('id') id: string, @Body() productData: Product) {
     const updatedProduct = this.productService.partialUpdate(id, productData);
     return updatedProduct;
+  }
+
+  @Delete(':id')
+  removeProduct(@Param('id') id: string) {
+    this.productService.removeProduct(id);
+    return { message: 'Product removed successfully' };
   }
 }
