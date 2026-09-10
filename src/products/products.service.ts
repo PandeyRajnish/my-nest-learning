@@ -46,6 +46,24 @@ export class ProductsService {
     return { ...product, ...updatedProduct };
   }
 
+  partialUpdate(
+    id: string,
+    productData: {
+      title?: string;
+      description?: string;
+      price?: number;
+    },
+  ) {
+    const [product, index] = this.findProduct(id);
+    const updatedProduct = {
+      ...product,
+      ...productData,
+    };
+
+    this.product[index] = updatedProduct;
+    return updatedProduct;
+  }
+
   private findProduct(id: string): [Product, number] {
     const productIndex = this.product.findIndex((prod) => prod.id === id);
     if (productIndex === -1) {
