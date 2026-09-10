@@ -103,7 +103,7 @@ sequenceDiagram
 
 1. Request hits Nest (Express under the hood).
 2. Route decorator (`@Get`, `@Post`, …) picks the handler.
-3. Parameter decorators (`@Param`, `@Body`) extract data.
+3. Parameter decorators (`@Param`, `@Body`, `@Req`) extract data.
 4. Controller calls the injected service.
 5. Service returns data (or throws `NotFoundException`).
 6. Nest serializes the return value as JSON.
@@ -123,6 +123,80 @@ sequenceDiagram
 @Get(':id')               // method decorator
 getProduct(@Param('id') id: string) {}  // param decorator
 ```
+
+Three places a decorator can sit:
+
+```
+@class on the class          @method on a handler         @param on an argument
+@Module / @Controller        @Get / @Post / @HttpCode     @Param / @Body / @Req
+@Injectable / @Catch         @UseGuards / @Header         @Query / @Headers
+```
+
+---
+
+### Decorator cheat sheet (what each one does)
+
+`*` = used in this project.
+
+#### Class — “what is this class?”
+
+| Decorator | Does this |
+|-----------|-----------|
+| `@Module()` * | Registers controllers, providers, imports, exports for one feature. |
+| `@Global()` | Makes this module's exports available everywhere (no need to import it). |
+| `@Controller('path')` * | Marks an HTTP controller; `'path'` is the base route. |
+| `@Injectable()` * | Marks a class Nest can create and inject (a provider/service). |
+| `@Inject('TOKEN')` | Inject a custom token instead of a class type. |
+| `@Optional()` | This constructor dependency may be missing (`undefined`). |
+| `@Catch(HttpException)` | Marks an exception filter that handles that error type. |
+| `@SetMetadata('key', val)` | Attach custom metadata (guards/roles often read this). |
+
+#### HTTP methods — “which verb + path?”
+
+| Decorator | Does this |
+|-----------|-----------|
+| `@Get('path')` * | Handle GET (read). Empty `()` = the controller's base path. |
+| `@Post('path')` * | Handle POST (create). |
+| `@Put('path')` * | Handle PUT (replace whole resource). |
+| `@Patch('path')` * | Handle PATCH (partial update). |
+| `@Delete('path')` * | Handle DELETE (remove). |
+| `@Head('path')` | Handle HEAD (headers only, no body). |
+| `@Options('path')` | Handle OPTIONS (CORS preflight / allowed methods). |
+| `@All('path')` | Handle **every** HTTP method on that path. |
+
+#### Parameters — “pull this from the request”
+
+| Decorator | Does this |
+|-----------|-----------|
+| `@Param('id')` * | Value from the URL path (`/products/:id`). |
+| `@Body()` * | Whole JSON body. `@Body('title')` = one field. |
+| `@Query('page')` | Query string (`?page=2`). |
+| `@Headers('user-agent')` | One request header (or all headers if no name). |
+| `@Req()` / `@Request()` * | Whole Express (or Fastify) request object. |
+| `@Res()` / `@Response()` | Whole response object — you must send the response yourself. |
+| `@Next()` | Express `next()` — pass control to the next handler. |
+| `@Session()` | Session object (`req.session`). |
+| `@Ip()` | Client IP address. |
+| `@HostParam('host')` | Host/subdomain param from `@Controller({ host: ':host.example.com' })`. |
+| `@UploadedFile()` | Single uploaded file (needs FileInterceptor). |
+| `@UploadedFiles()` | Multiple uploaded files. |
+
+#### Handler extras — “how to run / respond”
+
+| Decorator | Does this |
+|-----------|-----------|
+| `@HttpCode(201)` | Set the success status code (default POST is 201 in Nest, GET is 200). |
+| `@Header('Cache-Control', 'none')` | Set a response header. |
+| `@Redirect('/path', 301)` | Redirect the client. |
+| `@Render('template')` | Render a view template instead of JSON. |
+| `@Sse()` | Server-Sent Events stream. |
+| `@UseGuards(AuthGuard)` | Run guards first (auth/roles). Can go on class or method. |
+| `@UsePipes(ValidationPipe)` | Transform/validate input. Class or method. |
+| `@UseInterceptors(Logging)` | Wrap the handler (logging, mapping, timeout). Class or method. |
+| `@UseFilters(HttpFilter)` | Catch errors for this class/method. |
+| `@Version('1')` | URI/header versioning (`/v1/...`). |
+
+**Interview one-liner:** Class decorators declare *what* the class is. Method decorators declare *which HTTP route*. Param decorators declare *which slice of the request* to inject.
 
 ---
 
@@ -329,7 +403,10 @@ removeProduct(@Param('id') id: string) {
 | `@Param('id')` | URL path | `/products/123` → `'123'` |
 | `@Body()` | JSON body | whole object |
 | `@Body('title')` | One body field | `'iPhone'` |
-| `@Query('page')` | Query string | `?page=2` (not used here yet) |
+| `@Query('page')` | Query string | `?page=2` |
+| `@Req()` | Whole HTTP request | `req.params`, `req.query`, `req.headers` |
+| `@Headers('user-agent')` | One header | `'Mozilla/...'` |
+| `@Res()` | Express response object | use only if you send the response yourself |
 
 ```ts
 @Get(':id')
@@ -338,6 +415,57 @@ getProduct(@Param('id') id: string) { ... }
 @Post()
 addProduct(@Body('title') pTitle: string) { ... }
 ```
+
+---
+
+### `@Req()` and the `Request` type
+
+**What:** `@Req()` injects the **raw HTTP request** (Express `Request` by default). Use it when you need several parts of the request at once — params, query, headers, cookies — instead of picking them one-by-one with `@Param` / `@Query` / `@Headers`.
+
+**Interview:** Nest sits on Express (or Fastify). `@Req()` is the platform request object. Prefer specific decorators (`@Param`, `@Body`) when you only need one field; use `@Req()` when you need the full request. Type it as Express `Request` (or Fastify's request type if you switch platforms).
+
+```ts
+import { Controller, Get, Req } from '@nestjs/common';
+import type { Request } from 'express'; // type-only import — see gotcha below
+
+@Controller()
+export class AppController {
+  @Get(':id')
+  fetchReq(@Req() req: Request) {
+    const { id } = req.params;           // /:id
+    const queryParams = req.query;       // ?foo=bar
+    const userAgent = req.headers['user-agent'];
+    return { id, queryParams, userAgent };
+  }
+}
+```
+
+```mermaid
+flowchart LR
+  HTTP["GET /abc?foo=bar"] --> Nest
+  Nest -->|"@Req()"| Req["Express Request"]
+  Req --> Params["req.params.id"]
+  Req --> Query["req.query"]
+  Req --> Headers["req.headers"]
+```
+
+| Piece | How you get it | Same thing without `@Req()` |
+|-------|----------------|-----------------------------|
+| Path `:id` | `req.params.id` | `@Param('id') id: string` |
+| Query `?foo=` | `req.query` | `@Query() query` |
+| Headers | `req.headers['user-agent']` | `@Headers('user-agent') ua: string` |
+| Body | `req.body` | `@Body() body` |
+
+**Prefer the specific decorator** in most handlers. `@Req()` is the escape hatch for the whole object.
+
+**TS gotcha (`isolatedModules` + `emitDecoratorMetadata`):** `Request` is a **type**, not a runtime value. In a decorated parameter (`@Req() req: Request`) you must import it as a type:
+
+```ts
+import type { Request } from 'express';  // correct
+import { Request } from 'express';       // error: "must be imported with 'import type'"
+```
+
+**Interview one-liner:** `@Req()` gives you Express `Request`. Import it with `import type` so TypeScript does not try to emit it as decorator metadata.
 
 ---
 
@@ -373,9 +501,13 @@ await app.listen(process.env.PORT ?? 3000);
 | PUT vs PATCH? | PUT replaces the resource. PATCH updates part of it. |
 | Why `@Injectable()`? | Marks a class as a provider Nest can instantiate and inject. |
 | What is a decorator? | Metadata annotation Nest uses for routing, DI, and params. |
+| Three kinds of Nest decorators? | Class (`@Module`, `@Controller`), method (`@Get`, `@UseGuards`), param (`@Body`, `@Req`). |
 | Default provider scope? | Singleton. |
 | How does Nest know the route? | `@Controller('products')` + `@Get(':id')` → `GET /products/:id`. |
 | What happens on missing product? | Service throws `NotFoundException` → HTTP 404. |
+| What is `@Req()`? | Injects the raw Express `Request` (params, query, headers, body). |
+| `@Req()` vs `@Param` / `@Query`? | Specific decorators extract one piece; `@Req()` is the whole request. |
+| Why `import type { Request }`? | `Request` is a type. With `emitDecoratorMetadata` + `isolatedModules`, types in decorated signatures must be type-only imports. |
 
 ---
 
@@ -391,7 +523,7 @@ await app.listen(process.env.PORT ?? 3000);
     @Get @Post @Put @Patch @Delete
                 │
                 ▼
-         @Param  /  @Body
+         @Param  /  @Body  /  @Req()
                 │
                 ▼
             Service methods

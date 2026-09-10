@@ -1,12 +1,18 @@
-import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
+import { Controller, Get, Req } from '@nestjs/common';
+import type { Request } from 'express';
 
-@Controller('products')
+@Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  @Get(':id')
+  fetchReq(@Req() req: Request) {
+    const { id } = req.params;
+    const queryParams = req.query;
+    const userAgent = req.headers['user-agent'];
 
-  @Get('get')
-  getHello(): string {
-    return this.appService.getHello();
+    return {
+      id,
+      queryParams,
+      userAgent,
+    };
   }
 }
