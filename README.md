@@ -1,50 +1,127 @@
-# NestJS — Revision & Interview Notes
+# NestJS — Practice notebook
 
-Short answers, one-line examples from **this project**, and visuals you can recall in interviews.
+Revision + interview notes for **this project**. Add a new numbered unit when you practice a topic. Do not rewrite old units — append notes under **Practice notes**.
 
 ---
 
-## 30-second pitch
+## How to use this file
 
-**NestJS** is a TypeScript Node.js framework for building scalable APIs. It uses **decorators**, **modules**, and **Dependency Injection** (like Angular) on top of Express (or Fastify).
+| Marker | Meaning |
+|--------|---------|
+| ✅ | Practiced in this repo — notes filled |
+| 📝 | Next / later — skeleton ready, fill while you code |
 
-```ts
-const app = await NestFactory.create(AppModule); // bootstraps the app from the root module
+**When you start a new topic** (Pipes, Guards, …):
+
+1. Find its unit below (or copy the template at the bottom).
+2. Flip `📝` → `✅`.
+3. Fill **What / Interview / Example / Visual**.
+4. Dump experiments under **Practice notes** (date + what you tried + what broke).
+5. Add 1–2 rows to [Interview Q&A](#interview-qa).
+
+```markdown
+## N. Topic name — ✅
+
+**One-liner:** …
+**In the pipeline:** …
+
+**What:**
+**Interview:**
+**Example:** (from this project)
+**Visual:**
+
+### Practice notes
+- YYYY-MM-DD — what I built / what I learned / gotcha
 ```
 
 ---
 
-## Big picture (recall this first)
+## Learning path
+
+Official-ish Nest order. Request flows **top → bottom**.
 
 ```
- Client (HTTP)
+ Incoming request
       │
       ▼
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│ Controller  │ ──► │   Service    │ ──► │  Data/Model │
-│ (routes)    │     │ (business)   │     │  (shape)    │
-└─────────────┘     └─────────────┘     └─────────────┘
-      ▲                    ▲
-      │         Nest IoC injects Service into Controller
+  07 Middleware          📝   logger, cors, raw Express-style
       │
- @Module({ controllers, providers, imports })
+      ▼
+  08 Guards              📝   can this request proceed? (auth)
+      │
+      ▼
+  09 Interceptors (pre)  📝   wrap before handler (timing, map)
+      │
+      ▼
+  10 Pipes               📝   transform + validate input
+      │
+      ▼
+  03 Controller          ✅   pick route, pull params
+      │
+      ▼
+  04 Service / DI        ✅   business logic
+      │
+      ▼
+  09 Interceptors (post) 📝   wrap after handler
+      │
+      ▼
+  11 Exception filters   📝   shape errors (if thrown)
+      │
+      ▼
+   HTTP response
 ```
 
 ```mermaid
-flowchart LR
-  Client -->|"HTTP GET/POST/PUT/PATCH/DELETE"| Controller
-  Controller -->|"calls methods"| Service
-  Service -->|"uses"| Model
-  Module -.->|"registers"| Controller
-  Module -.->|"registers"| Service
-  NestIoC -.->|"injects ProductsService"| Controller
+flowchart TB
+  Req[HTTP request] --> MW[07 Middleware 📝]
+  MW --> G[08 Guards 📝]
+  G --> I1[09 Interceptors before 📝]
+  I1 --> P[10 Pipes 📝]
+  P --> C[03 Controller ✅]
+  C --> S[04 Service ✅]
+  S --> I2[09 Interceptors after 📝]
+  I2 --> Res[Response]
+  S -.->|throw| F[11 Exception filters 📝]
+  F --> Res
 ```
 
-**Interview line:** Controller handles HTTP. Service holds logic. Module wires them. Nest's IoC container injects the service into the controller.
+| # | Unit | Status |
+|---|------|--------|
+| 00 | [Overview & project map](#00-overview--project-map) | ✅ |
+| 01 | [Decorators](#01-decorators-) | ✅ |
+| 02 | [Modules](#02-modules-) | ✅ |
+| 03 | [Controllers & HTTP methods](#03-controllers--http-methods-) | ✅ |
+| 04 | [Providers, services & DI](#04-providers-services--di-) | ✅ |
+| 05 | [Request data (`@Param` `@Body` `@Req`)](#05-request-data-) | ✅ |
+| 06 | [Exceptions (throwing)](#06-exceptions-throwing-) | ✅ |
+| 07 | [Middleware](#07-middleware-) | 📝 |
+| 08 | [Guards](#08-guards-) | 📝 |
+| 09 | [Interceptors](#09-interceptors-) | 📝 |
+| 10 | [Pipes](#10-pipes-) | 📝 |
+| 11 | [Exception filters](#11-exception-filters-) | 📝 |
+| 12 | [Custom providers / scope](#12-custom-providers--scope-) | 📝 |
+| — | [Interview Q&A](#interview-qa) | living |
+| — | [Run the app](#run-the-app) | — |
 
 ---
 
-## This project's map
+## 00. Overview & project map
+
+**One-liner:** NestJS is a TypeScript Node framework: modules + decorators + DI on top of Express (or Fastify).
+
+```ts
+const app = await NestFactory.create(AppModule); // bootstraps from the root module
+```
+
+**Interview:** `NestFactory.create(AppModule)` builds the DI graph, then starts HTTP.
+
+```
+ Client
+   → Controller (routes)
+     → Service (logic)
+       → Model (shape)
+ Module registers both; IoC injects Service into Controller
+```
 
 ```
 AppModule
@@ -54,77 +131,32 @@ AppModule
         └── ProductsService     →  in-memory Product[]
 ```
 
-```mermaid
-flowchart TB
-  subgraph AppModule
-    AppController
-    AppService
-    ProductsModule
-  end
-
-  subgraph ProductsModule
-    ProductsController
-    ProductsService
-    Product["Product model"]
-  end
-
-  AppController --> AppService
-  ProductsController -->|"constructor(private productService)"| ProductsService
-  ProductsService --> Product
-  AppModule -->|"imports"| ProductsModule
-```
-
 | File | Role |
 |------|------|
 | `src/main.ts` | Starts the HTTP server |
 | `src/app.module.ts` | Root module |
 | `src/products/products.module.ts` | Feature module |
 | `src/products/products.controller.ts` | Routes for `/products` |
-| `src/products/products.service.ts` | Create / read / update / delete logic |
+| `src/products/products.service.ts` | CRUD logic |
 | `src/products/products.model.ts` | `Product` shape |
 
----
+### Practice notes
 
-## Request lifecycle
-
-```mermaid
-sequenceDiagram
-  participant C as Client
-  participant Nest as NestJS
-  participant Ctrl as ProductsController
-  participant Svc as ProductsService
-
-  C->>Nest: POST /products { title, description, price }
-  Nest->>Ctrl: @Post() addProduct(@Body ...)
-  Ctrl->>Svc: insertProduct(...)
-  Svc-->>Ctrl: new id
-  Ctrl-->>C: { id }
-```
-
-1. Request hits Nest (Express under the hood).
-2. Route decorator (`@Get`, `@Post`, …) picks the handler.
-3. Parameter decorators (`@Param`, `@Body`, `@Req`) extract data.
-4. Controller calls the injected service.
-5. Service returns data (or throws `NotFoundException`).
-6. Nest serializes the return value as JSON.
+- — bootstrap + products CRUD in memory
 
 ---
 
-## Core concepts
+## 01. Decorators — ✅
 
-### 1. Decorator
+**One-liner:** Functions that attach **metadata**. Nest reads it to wire routes, DI, and params.
 
-**What:** A function that adds metadata to a class, method, or parameter. Nest reads that metadata to know “this is a controller”, “this is GET /products”, etc.
-
-**Interview:** TypeScript decorators + `reflect-metadata`. Nest is metadata-driven: you annotate, the framework wires routing and DI.
+**Interview:** TypeScript decorators + `reflect-metadata`. You annotate; the framework does the wiring.
 
 ```ts
-@Controller('products')   // class decorator
-@Get(':id')               // method decorator
-getProduct(@Param('id') id: string) {}  // param decorator
+@Controller('products')   // class
+@Get(':id')               // method
+getProduct(@Param('id') id: string) {}  // param
 ```
-
-Three places a decorator can sit:
 
 ```
 @class on the class          @method on a handler         @param on an argument
@@ -132,105 +164,76 @@ Three places a decorator can sit:
 @Injectable / @Catch         @UseGuards / @Header         @Query / @Headers
 ```
 
----
-
-### Decorator cheat sheet (what each one does)
-
 `*` = used in this project.
 
-#### Class — “what is this class?”
+### Class — what is this class?
 
 | Decorator | Does this |
 |-----------|-----------|
-| `@Module()` * | Registers controllers, providers, imports, exports for one feature. |
-| `@Global()` | Makes this module's exports available everywhere (no need to import it). |
-| `@Controller('path')` * | Marks an HTTP controller; `'path'` is the base route. |
-| `@Injectable()` * | Marks a class Nest can create and inject (a provider/service). |
-| `@Inject('TOKEN')` | Inject a custom token instead of a class type. |
-| `@Optional()` | This constructor dependency may be missing (`undefined`). |
-| `@Catch(HttpException)` | Marks an exception filter that handles that error type. |
-| `@SetMetadata('key', val)` | Attach custom metadata (guards/roles often read this). |
+| `@Module()` * | Registers controllers, providers, imports, exports. |
+| `@Global()` | Exports available app-wide (no import needed). |
+| `@Controller('path')` * | HTTP controller; `'path'` is the base route. |
+| `@Injectable()` * | Provider Nest can create and inject. |
+| `@Inject('TOKEN')` | Inject a custom token, not a class type. |
+| `@Optional()` | Constructor dep may be missing. |
+| `@Catch(HttpException)` | Exception filter for that error type. |
+| `@SetMetadata('key', val)` | Custom metadata (roles/guards read this). |
 
-#### HTTP methods — “which verb + path?”
-
-| Decorator | Does this |
-|-----------|-----------|
-| `@Get('path')` * | Handle GET (read). Empty `()` = the controller's base path. |
-| `@Post('path')` * | Handle POST (create). |
-| `@Put('path')` * | Handle PUT (replace whole resource). |
-| `@Patch('path')` * | Handle PATCH (partial update). |
-| `@Delete('path')` * | Handle DELETE (remove). |
-| `@Head('path')` | Handle HEAD (headers only, no body). |
-| `@Options('path')` | Handle OPTIONS (CORS preflight / allowed methods). |
-| `@All('path')` | Handle **every** HTTP method on that path. |
-
-#### Parameters — “pull this from the request”
+### HTTP — which verb + path?
 
 | Decorator | Does this |
 |-----------|-----------|
-| `@Param('id')` * | Value from the URL path (`/products/:id`). |
-| `@Body()` * | Whole JSON body. `@Body('title')` = one field. |
+| `@Get('path')` * | GET (read). `()` = controller base path. |
+| `@Post('path')` * | POST (create). |
+| `@Put('path')` * | PUT (replace whole resource). |
+| `@Patch('path')` * | PATCH (partial update). |
+| `@Delete('path')` * | DELETE (remove). |
+| `@Head('path')` | HEAD (headers only). |
+| `@Options('path')` | OPTIONS (CORS / allowed methods). |
+| `@All('path')` | Every HTTP method on that path. |
+
+### Params — pull this from the request
+
+| Decorator | Does this |
+|-----------|-----------|
+| `@Param('id')` * | URL path (`/products/:id`). |
+| `@Body()` * | JSON body. `@Body('title')` = one field. |
 | `@Query('page')` | Query string (`?page=2`). |
-| `@Headers('user-agent')` | One request header (or all headers if no name). |
-| `@Req()` / `@Request()` * | Whole Express (or Fastify) request object. |
-| `@Res()` / `@Response()` | Whole response object — you must send the response yourself. |
-| `@Next()` | Express `next()` — pass control to the next handler. |
-| `@Session()` | Session object (`req.session`). |
-| `@Ip()` | Client IP address. |
-| `@HostParam('host')` | Host/subdomain param from `@Controller({ host: ':host.example.com' })`. |
-| `@UploadedFile()` | Single uploaded file (needs FileInterceptor). |
-| `@UploadedFiles()` | Multiple uploaded files. |
+| `@Headers('user-agent')` | One header (or all if no name). |
+| `@Req()` / `@Request()` * | Whole Express/Fastify request. |
+| `@Res()` / `@Response()` | Whole response — you must send it yourself. |
+| `@Next()` | Express `next()`. |
+| `@Session()` | `req.session`. |
+| `@Ip()` | Client IP. |
+| `@HostParam('host')` | Host/subdomain param. |
+| `@UploadedFile()` / `@UploadedFiles()` | Uploads (needs interceptor). |
 
-#### Handler extras — “how to run / respond”
+### Handler extras — how to run / respond
 
-| Decorator | Does this |
-|-----------|-----------|
-| `@HttpCode(201)` | Set the success status code (default POST is 201 in Nest, GET is 200). |
-| `@Header('Cache-Control', 'none')` | Set a response header. |
-| `@Redirect('/path', 301)` | Redirect the client. |
-| `@Render('template')` | Render a view template instead of JSON. |
-| `@Sse()` | Server-Sent Events stream. |
-| `@UseGuards(AuthGuard)` | Run guards first (auth/roles). Can go on class or method. |
-| `@UsePipes(ValidationPipe)` | Transform/validate input. Class or method. |
-| `@UseInterceptors(Logging)` | Wrap the handler (logging, mapping, timeout). Class or method. |
-| `@UseFilters(HttpFilter)` | Catch errors for this class/method. |
-| `@Version('1')` | URI/header versioning (`/v1/...`). |
+| Decorator | Does this | Practice unit |
+|-----------|-----------|---------------|
+| `@HttpCode(201)` | Set success status. | 03 |
+| `@Header(...)` | Set a response header. | 03 |
+| `@Redirect(...)` | Redirect. | 03 |
+| `@UseGuards(...)` | Auth / roles before handler. | 08 |
+| `@UseInterceptors(...)` | Wrap before/after handler. | 09 |
+| `@UsePipes(...)` | Transform + validate input. | 10 |
+| `@UseFilters(...)` | Catch errors for class/method. | 11 |
+| `@Version('1')` | API versioning. | later |
 
-**Interview one-liner:** Class decorators declare *what* the class is. Method decorators declare *which HTTP route*. Param decorators declare *which slice of the request* to inject.
+**Interview:** Class = *what it is*. Method = *which route*. Param = *which slice of the request*.
 
----
+### Practice notes
 
-### 2. Dependency Injection (DI)
-
-**What:** You declare what a class needs; Nest creates and injects it. You do not `new ProductsService()` yourself.
-
-**Interview:** Inversion of Control. Nest's IoC container instantiates providers and injects them via the constructor. Makes code testable (swap a mock service).
-
-```ts
-constructor(private productService: ProductsService) {} // Nest injects it
-```
-
-```mermaid
-flowchart LR
-  subgraph "You write"
-    Ctrl["ProductsController"]
-  end
-  subgraph "Nest IoC container"
-    Svc["ProductsService (singleton by default)"]
-  end
-  Ctrl -->|"needs"| Svc
-  Nest["Nest sees constructor type"] -->|"creates & injects"| Ctrl
-```
-
-**Default scope:** singleton — one `ProductsService` shared for the whole app.
+- —
 
 ---
 
-### 3. `@Module()` decorator
+## 02. Modules — ✅
 
-**What:** Groups related controllers and providers. The building block of a Nest app.
+**One-liner:** A feature box: registers controllers + providers and can import/export other modules.
 
-**Interview:** A module is a cohesive feature. `imports` bring other modules, `controllers` handle routes, `providers` are injectable classes, `exports` share providers with other modules.
+**Interview:** Cohesive feature. `imports` / `controllers` / `providers` / `exports`.
 
 ```ts
 @Module({
@@ -242,12 +245,12 @@ export class ProductsModule {}
 
 | Key | Meaning |
 |-----|---------|
-| `imports` | Other modules this module needs |
-| `controllers` | Route handlers in this module |
-| `providers` | Services / injectables Nest can inject |
+| `imports` | Other modules this one needs |
+| `controllers` | Route handlers |
+| `providers` | Injectables Nest can create |
 | `exports` | Providers other modules may reuse |
 
-Root module example:
+Root:
 
 ```ts
 @Module({
@@ -258,63 +261,27 @@ Root module example:
 export class AppModule {}
 ```
 
+### Practice notes
+
+- —
+
 ---
 
-### 4. Controller
+## 03. Controllers & HTTP methods — ✅
 
-**What:** Maps HTTP requests to methods. Thin: parse input, call service, return response.
-
-**Interview:** Controllers are the entry point for HTTP. They should not contain business logic — that belongs in services.
+**One-liner:** Controller maps HTTP → methods. Keep it thin; logic lives in the service.
 
 ```ts
-@Controller('products')  // base path → /products
+@Controller('products')  // → /products
 export class ProductsController { ... }
 ```
 
----
-
-### 5. Provider / Service / `@Injectable()`
-
-**What:** A class Nest can inject. Services hold business logic.
-
-**Interview:** Anything listed in `providers` can be injected. `@Injectable()` marks the class so Nest can manage it and inject *its* dependencies too.
-
-```ts
-@Injectable()
-export class ProductsService {
-  product: Product[] = [];
-}
-```
-
----
-
-### 6. Model
-
-**What:** The shape of your data. Here it is a plain TypeScript class (not a DB entity yet).
-
-```ts
-export class Product {
-  constructor(
-    public id: string,
-    public title: string,
-    public description: string,
-    public price: number,
-  ) {}
-}
-```
-
----
-
-## HTTP methods (CRUD)
-
-This app's API:
-
-| Method | Route | Meaning | This project |
-|--------|--------|---------|--------------|
+| Method | Route | Meaning | Handler |
+|--------|--------|---------|---------|
 | **GET** | `/products` | Read all | `getProducts()` |
 | **GET** | `/products/:id` | Read one | `getProduct(id)` |
 | **POST** | `/products` | Create | `addProduct(...)` |
-| **PUT** | `/products/:id` | Replace whole resource | `updateProduct(...)` |
+| **PUT** | `/products/:id` | Replace whole | `updateProduct(...)` |
 | **PATCH** | `/products/:id` | Update some fields | `partialUpdate(...)` |
 | **DELETE** | `/products/:id` | Remove | `removeProduct(id)` |
 
@@ -332,25 +299,21 @@ flowchart TB
   end
 ```
 
-### GET — read (safe, idempotent)
+**GET** — safe, idempotent:
 
 ```ts
 @Get()
 getProducts() {
   return this.productService.getProducts();
 }
-```
 
-### GET with param — read one
-
-```ts
 @Get(':id')
 getProduct(@Param('id') id: string) {
   return this.productService.getProduct(id);
 }
 ```
 
-### POST — create (not idempotent)
+**POST** — create, not idempotent:
 
 ```ts
 @Post()
@@ -359,32 +322,26 @@ addProduct(@Body('title') pTitle: string, @Body('description') pDesc: string, @B
 }
 ```
 
-### PUT vs PATCH — interview favorite
+**PUT vs PATCH** (interview favorite):
 
 | | **PUT** | **PATCH** |
 |--|---------|-----------|
 | Intent | Replace the **whole** resource | Update **only sent** fields |
-| Missing fields | Treated as cleared / null | Left unchanged |
+| Missing fields | Cleared / null in this project | Left unchanged |
 | Idempotent | Yes | Usually yes for simple updates |
-
-**PUT** in this project — fields you omit become `null`:
 
 ```ts
 @Put(':id')
 updateProduct(@Param('id') id: string, @Body() productData: Product) { ... }
-```
 
-**PATCH** in this project — spread existing product, then overlay body:
-
-```ts
 @Patch(':id')
 partialUpdate(@Param('id') id: string, @Body() productData: Product) { ... }
 // service: { ...product, ...productData }
 ```
 
-**One-liner for interviews:** PUT = full replace. PATCH = partial update.
+**One-liner:** PUT = full replace. PATCH = partial update.
 
-### DELETE — remove
+**DELETE:**
 
 ```ts
 @Delete(':id')
@@ -394,9 +351,55 @@ removeProduct(@Param('id') id: string) {
 }
 ```
 
+### Practice notes
+
+- —
+
 ---
 
-## Parameter decorators (how data enters the handler)
+## 04. Providers, services & DI — ✅
+
+**One-liner:** You declare what a class needs; Nest creates and injects it. No `new ProductsService()`.
+
+**Interview:** IoC container + constructor injection. Default **singleton**. Testable (swap a mock).
+
+```ts
+constructor(private productService: ProductsService) {}
+
+@Injectable()
+export class ProductsService {
+  product: Product[] = [];
+}
+```
+
+```mermaid
+flowchart LR
+  Ctrl["ProductsController"] -->|"needs"| Svc["ProductsService"]
+  Nest["IoC reads constructor type"] -->|"creates & injects"| Ctrl
+```
+
+**Model** (plain class for now, not a DB entity):
+
+```ts
+export class Product {
+  constructor(
+    public id: string,
+    public title: string,
+    public description: string,
+    public price: number,
+  ) {}
+}
+```
+
+### Practice notes
+
+- —
+
+---
+
+## 05. Request data — ✅
+
+**One-liner:** Param decorators extract slices of the HTTP request into handler arguments.
 
 | Decorator | From | Example |
 |-----------|------|---------|
@@ -404,36 +407,26 @@ removeProduct(@Param('id') id: string) {
 | `@Body()` | JSON body | whole object |
 | `@Body('title')` | One body field | `'iPhone'` |
 | `@Query('page')` | Query string | `?page=2` |
-| `@Req()` | Whole HTTP request | `req.params`, `req.query`, `req.headers` |
+| `@Req()` | Whole request | `req.params`, `req.query`, `req.headers` |
 | `@Headers('user-agent')` | One header | `'Mozilla/...'` |
-| `@Res()` | Express response object | use only if you send the response yourself |
+| `@Res()` | Express response | only if you send the response yourself |
 
-```ts
-@Get(':id')
-getProduct(@Param('id') id: string) { ... }
+### `@Req()` and `Request`
 
-@Post()
-addProduct(@Body('title') pTitle: string) { ... }
-```
+**What:** Raw Express `Request`. Use when you need several pieces at once.
 
----
-
-### `@Req()` and the `Request` type
-
-**What:** `@Req()` injects the **raw HTTP request** (Express `Request` by default). Use it when you need several parts of the request at once — params, query, headers, cookies — instead of picking them one-by-one with `@Param` / `@Query` / `@Headers`.
-
-**Interview:** Nest sits on Express (or Fastify). `@Req()` is the platform request object. Prefer specific decorators (`@Param`, `@Body`) when you only need one field; use `@Req()` when you need the full request. Type it as Express `Request` (or Fastify's request type if you switch platforms).
+**Interview:** Prefer `@Param` / `@Body` / `@Query` for one field. `@Req()` is the escape hatch. Type as Express `Request` (or Fastify's type if you switch).
 
 ```ts
 import { Controller, Get, Req } from '@nestjs/common';
-import type { Request } from 'express'; // type-only import — see gotcha below
+import type { Request } from 'express';
 
 @Controller()
 export class AppController {
   @Get(':id')
   fetchReq(@Req() req: Request) {
-    const { id } = req.params;           // /:id
-    const queryParams = req.query;       // ?foo=bar
+    const { id } = req.params;
+    const queryParams = req.query;
     const userAgent = req.headers['user-agent'];
     return { id, queryParams, userAgent };
   }
@@ -449,101 +442,254 @@ flowchart LR
   Req --> Headers["req.headers"]
 ```
 
-| Piece | How you get it | Same thing without `@Req()` |
-|-------|----------------|-----------------------------|
-| Path `:id` | `req.params.id` | `@Param('id') id: string` |
-| Query `?foo=` | `req.query` | `@Query() query` |
-| Headers | `req.headers['user-agent']` | `@Headers('user-agent') ua: string` |
-| Body | `req.body` | `@Body() body` |
+| Piece | Via `@Req()` | Specific decorator |
+|-------|----------------|--------------------|
+| Path `:id` | `req.params.id` | `@Param('id')` |
+| Query | `req.query` | `@Query()` |
+| Headers | `req.headers['user-agent']` | `@Headers('user-agent')` |
+| Body | `req.body` | `@Body()` |
 
-**Prefer the specific decorator** in most handlers. `@Req()` is the escape hatch for the whole object.
-
-**TS gotcha (`isolatedModules` + `emitDecoratorMetadata`):** `Request` is a **type**, not a runtime value. In a decorated parameter (`@Req() req: Request`) you must import it as a type:
+**TS gotcha:** `isolatedModules` + `emitDecoratorMetadata` → types in decorated signatures need `import type`:
 
 ```ts
 import type { Request } from 'express';  // correct
-import { Request } from 'express';       // error: "must be imported with 'import type'"
+import { Request } from 'express';       // error
 ```
 
-**Interview one-liner:** `@Req()` gives you Express `Request`. Import it with `import type` so TypeScript does not try to emit it as decorator metadata.
+### Practice notes
+
+- —
 
 ---
 
-## Exceptions
+## 06. Exceptions (throwing) — ✅
 
-**Interview:** Throw Nest HTTP exceptions from the service; Nest turns them into the right status code.
+**One-liner:** Throw Nest HTTP exceptions; Nest maps them to status + JSON. Full **filters** = unit 11.
 
 ```ts
-throw new NotFoundException('Product not found'); // → 404 JSON
+throw new NotFoundException('Product not found'); // → 404
 ```
+
+**Interview:** Service throws; Nest serializes. Custom shape / catch-all → Exception filters.
+
+### Practice notes
+
+- —
 
 ---
 
-## Bootstrap (`main.ts`)
+## 07. Middleware — 📝
+
+**One-liner:** Runs **first**. Express-style `(req, res, next)`. Logging, CORS, raw body, path-specific logic.
+
+**In the pipeline:** Request → **Middleware** → Guards → …
+
+**Hook it with:** `NestMiddleware` + `configure(consumer)` in a module (`MiddlewareConsumer`). Not a controller decorator.
+
+**Interview:** Closest to Express middleware. Cannot inject into the DI tree as easily as guards unless you use class middleware. Applied to routes via `forRoutes` / `exclude`.
 
 ```ts
-const app = await NestFactory.create(AppModule);
-await app.listen(process.env.PORT ?? 3000);
+// fill when you practice
+// export class LoggerMiddleware implements NestMiddleware {
+//   use(req: Request, res: Response, next: NextFunction) { next(); }
+// }
 ```
 
-**Interview:** `NestFactory.create(AppModule)` builds the DI graph from the root module, then starts the HTTP server.
+**Visual:** (add after practice)
+
+### Practice notes
+
+- Date:
+- What I built:
+- Applied globally vs `forRoutes(...)`:
+- Gotcha:
 
 ---
 
-## Quick interview Q&A
+## 08. Guards — 📝
+
+**One-liner:** **Can this request proceed?** Returns `true` / `false` (or throws). Auth, roles, API keys.
+
+**In the pipeline:** Middleware → **Guards** → Interceptors → Pipes → Controller
+
+**Hook it with:** `@UseGuards(AuthGuard)` on class or method. `implements CanActivate`.
+
+**Interview:** Guard = authorization checkpoint. Reads `ExecutionContext`. Roles often use `@SetMetadata` + `Reflector`.
+
+```ts
+// fill when you practice
+// @Injectable()
+// export class AuthGuard implements CanActivate {
+//   canActivate(context: ExecutionContext): boolean { return true; }
+// }
+```
+
+**Visual:** (add after practice)
+
+### Practice notes
+
+- Date:
+- What I built:
+- Controller-level vs method-level:
+- Gotcha:
+
+---
+
+## 09. Interceptors — 📝
+
+**One-liner:** **Wrap** the handler: run before *and* after. Logging time, map the response, timeout, cache.
+
+**In the pipeline:** Guards → **Interceptor (pre)** → Pipes → Controller → **Interceptor (post)**
+
+**Hook it with:** `@UseInterceptors(...)`. `implements NestInterceptor`. Uses RxJS `Observable`.
+
+**Interview:** AOP. `intercept(context, next)` then `next.handle().pipe(...)`. Unlike middleware, they see the controller result. Unlike guards, they don't decide allow/deny.
+
+```ts
+// fill when you practice
+// @Injectable()
+// export class LoggingInterceptor implements NestInterceptor {
+//   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+//     return next.handle();
+//   }
+// }
+```
+
+**Visual:** (add after practice)
+
+### Practice notes
+
+- Date:
+- What I built:
+- Before vs after (`tap` / `map`):
+- Gotcha:
+
+---
+
+## 10. Pipes — 📝
+
+**One-liner:** **Transform** and/or **validate** input *before* the handler runs (`ParseIntPipe`, `ValidationPipe`).
+
+**In the pipeline:** Interceptors (pre) → **Pipes** → Controller handler
+
+**Hook it with:** `@UsePipes(...)` or on a param: `@Param('id', ParseIntPipe)`. `implements PipeTransform`.
+
+**Interview:** Pipes sit on arguments. Built-ins: `ParseIntPipe`, `ParseUUIDPipe`, `ValidationPipe` (DTO + `class-validator`). Throw `BadRequestException` on bad input.
+
+```ts
+// fill when you practice
+// @Get(':id')
+// getProduct(@Param('id', ParseIntPipe) id: number) { ... }
+```
+
+**Visual:** (add after practice)
+
+### Practice notes
+
+- Date:
+- What I built:
+- Param pipe vs `@UsePipes` vs global `ValidationPipe`:
+- Gotcha:
+
+---
+
+## 11. Exception filters — 📝
+
+**One-liner:** Catch thrown errors and **shape the HTTP error body**. Unit 06 is just `throw`; this is *how it looks*.
+
+**In the pipeline:** Anything throws → **Filter** → response
+
+**Hook it with:** `@Catch(...)` on a filter class + `@UseFilters(...)` or `app.useGlobalFilters`.
+
+**Interview:** `Catch` + `ExceptionFilter`. Built-in already maps `HttpException`. Custom filters for logging + consistent `{ status, message, timestamp }`.
+
+```ts
+// fill when you practice
+// @Catch(HttpException)
+// export class HttpExceptionFilter implements ExceptionFilter { catch(exception, host) {} }
+```
+
+**Visual:** (add after practice)
+
+### Practice notes
+
+- Date:
+- What I built:
+- Global vs controller vs method:
+- Gotcha:
+
+---
+
+## 12. Custom providers / scope — 📝
+
+**One-liner:** Tokens, `useClass` / `useValue` / `useFactory`, and scopes (`DEFAULT` singleton, `REQUEST`, `TRANSIENT`).
+
+**Interview:** Default singleton. `REQUEST` = new instance per HTTP request (careful with leaks). Custom token when you don't inject a class.
+
+### Practice notes
+
+- Date:
+- What I built:
+- Gotcha:
+
+---
+
+## Interview Q&A
+
+Add a row when you finish a unit.
 
 | Question | Short answer |
 |----------|----------------|
-| Why NestJS over Express? | Structure, DI, modules, TypeScript, built-in patterns (guards, pipes, interceptors). Express is still underneath. |
-| What is a module? | A class with `@Module()` that registers controllers, providers, and imports. |
-| What is DI? | Nest creates dependencies and injects them; you declare them in the constructor. |
+| Why NestJS over Express? | Structure, DI, modules, TypeScript; Express still underneath. |
+| What is a module? | `@Module()` registering controllers, providers, imports. |
+| What is DI? | Nest creates deps and injects them via the constructor. |
 | Controller vs Service? | Controller = HTTP. Service = business logic. |
-| PUT vs PATCH? | PUT replaces the resource. PATCH updates part of it. |
-| Why `@Injectable()`? | Marks a class as a provider Nest can instantiate and inject. |
-| What is a decorator? | Metadata annotation Nest uses for routing, DI, and params. |
-| Three kinds of Nest decorators? | Class (`@Module`, `@Controller`), method (`@Get`, `@UseGuards`), param (`@Body`, `@Req`). |
+| PUT vs PATCH? | PUT replaces. PATCH updates part. |
+| Why `@Injectable()`? | Marks a provider Nest can instantiate and inject. |
+| What is a decorator? | Metadata Nest uses for routing, DI, params. |
+| Three kinds of Nest decorators? | Class, method, param. |
 | Default provider scope? | Singleton. |
 | How does Nest know the route? | `@Controller('products')` + `@Get(':id')` → `GET /products/:id`. |
-| What happens on missing product? | Service throws `NotFoundException` → HTTP 404. |
-| What is `@Req()`? | Injects the raw Express `Request` (params, query, headers, body). |
-| `@Req()` vs `@Param` / `@Query`? | Specific decorators extract one piece; `@Req()` is the whole request. |
-| Why `import type { Request }`? | `Request` is a type. With `emitDecoratorMetadata` + `isolatedModules`, types in decorated signatures must be type-only imports. |
+| Missing product? | `NotFoundException` → 404. |
+| What is `@Req()`? | Raw Express `Request`. |
+| `@Req()` vs `@Param` / `@Query`? | Specific = one slice; `@Req()` = whole request. |
+| Why `import type { Request }`? | Type-only; required with `emitDecoratorMetadata` + `isolatedModules`. |
+| Request pipeline order? | Middleware → Guards → Interceptors → Pipes → Controller → Interceptors → Filters (on error). |
+| Middleware vs Guard? | 📝 fill in unit 07/08 |
+| Guard vs Interceptor? | 📝 fill in unit 08/09 |
+| Pipe vs Interceptor? | 📝 fill in unit 09/10 |
+| Exception vs Exception filter? | Throw (06) vs shape the error response (11). 📝 |
 
 ---
 
-## Mental checklist (draw this in an interview)
+## Mental checklist
 
 ```
-@Module  →  registers  →  Controller + Provider
-                │
-                ▼
-         constructor(private service: Service)
-                │
-                ▼
+@Module  →  Controller + Provider
+              │
+     constructor(private service: Service)
+              │
+   Middleware → Guards → Interceptors → Pipes
+              │
     @Get @Post @Put @Patch @Delete
-                │
-                ▼
-         @Param  /  @Body  /  @Req()
-                │
-                ▼
-            Service methods
-                │
-                ▼
-         Model / data store
+              │
+         @Param / @Body / @Req()
+              │
+          Service methods
+              │
+     Interceptors (after) / Exception filters
 ```
 
 ---
 
-## Run this project
+## Run the app
 
 ```bash
 npm install
 npm run start:dev
 ```
 
-Server: `http://localhost:3000`
-
-Try:
+`http://localhost:3000`
 
 ```bash
 curl -X POST http://localhost:3000/products \
@@ -551,4 +697,24 @@ curl -X POST http://localhost:3000/products \
   -d '{"title":"Book","description":"Nest notes","price":10}'
 
 curl http://localhost:3000/products
+```
+
+---
+
+## New-unit template (copy below the last numbered unit)
+
+```markdown
+## 13. Topic name — 📝
+
+**One-liner:**
+**In the pipeline:**
+**Hook it with:**
+**Interview:**
+**Example:**
+**Visual:**
+
+### Practice notes
+- Date:
+- What I built:
+- Gotcha:
 ```
