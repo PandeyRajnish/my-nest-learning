@@ -92,7 +92,7 @@ flowchart TB
 | 02 | [Modules](#02-modules-) | ✅ |
 | 03 | [Controllers & HTTP methods](#03-controllers--http-methods-) | ✅ |
 | 04 | [Providers, services & DI](#04-providers-services--di-) | ✅ |
-| 05 | [Request data (`@Param` `@Body` `@Req` `@Res`)](#05-request-data-) | ✅ |
+| 05 | [Request data (`@Param` `@Body` `@Query` `@Req` `@Res`)](#05-request-data-) | ✅ |
 | 06 | [Exceptions (throwing)](#06-exceptions-throwing-) | ✅ |
 | 07 | [Middleware](#07-middleware-) | 📝 |
 | 08 | [Guards](#08-guards-) | 📝 |
@@ -407,9 +407,83 @@ export class Product {
 | `@Body()` | JSON body | whole object |
 | `@Body('title')` | One body field | `'iPhone'` |
 | `@Query('page')` | Query string | `?page=2` |
-| `@Req()` | Whole request | `req.params`, `req.query`, `req.headers` |
 | `@Headers('user-agent')` | One header | `'Mozilla/...'` |
+| `@Req()` | Whole request | `req.params`, `req.query`, `req.headers` |
 | `@Res()` | Express response | only if you send the response yourself |
+
+### `@Query()` — `?` and `&`
+
+**What:** Reads the **query string** — the optional `key=value` pairs after `?` in the URL. Not part of the route path.
+
+**How a URL is split:**
+
+```
+http://localhost:3000/42?name=Rajnish&age=25
+                      │  │            │
+                      │  │            └── &  next pair (age=25)
+                      │  └── ?  query string starts (name=Rajnish)
+                      └── path param  @Param('id') → "42"
+```
+
+| Symbol | Meaning |
+|--------|---------|
+| `?` | Starts the query string. Everything after `?` is query, not the path. **Once per URL.** |
+| `&` | Separates the next `key=value` pair. Repeat for more keys. |
+| `=` | Assigns a value to a key. |
+
+```
+?name=Rajnish              → one pair
+?name=Rajnish&age=25       → two pairs
+?name=Rajnish&age=25&city=Pune  → three pairs
+```
+
+No `?` → no query (`name` and `age` are `undefined`).
+
+**Interview:** `@Param` = path (`/products/:id`). `@Query` = optional filters after `?`. Query values are **strings** unless a pipe converts them (`ParseIntPipe` → unit 10). Prefer `@Query('name')` for one key; `@Query()` for the whole object.
+
+**This project** (`src/app.controller.ts`):
+
+```ts
+@Get(':id')
+fetchQuery(
+  @Param('id') id: string,
+  @Query('name') name: string,
+  @Query('age') age: number,  // still a string at runtime without a pipe
+) {
+  return { ID: `${id}`, Name: `${name}`, Age: `${age}` };
+}
+```
+
+```bash
+curl "http://localhost:3000/42?name=Rajnish&age=25"
+# → { "ID": "42", "Name": "Rajnish", "Age": "25" }
+```
+
+```mermaid
+flowchart LR
+  URL["GET /42?name=Rajnish&amp;age=25"] --> Split
+  Split -->|"path /42"| Param["@Param('id') → 42"]
+  Split -->|"? starts query"| Q1["@Query('name') → Rajnish"]
+  Split -->|"& next pair"| Q2["@Query('age') → 25"]
+```
+
+| Want | Decorator | Example URL |
+|------|-----------|-------------|
+| One query key | `@Query('name') name: string` | `?name=Rajnish` |
+| All query keys | `@Query() query: Record<string, string>` | `?name=Rajnish&age=25` → `{ name, age }` |
+| Same data via `@Req()` | `req.query` | `{ name: 'Rajnish', age: '25' }` |
+
+**`@Param` vs `@Query`**
+
+| | `@Param('id')` | `@Query('name')` |
+|--|----------------|------------------|
+| In the URL | Path: `/42` | After `?`: `?name=Rajnish` |
+| Required for the route? | Yes if the route is `:id` | No — omit `?` and it is `undefined` |
+| Typical use | Resource id | Filters, pagination, search: `?page=1&limit=10` |
+
+**One-liner:** `?` starts query params; `&` joins more `key=value` pairs. `@Query('x')` reads `x`.
+
+---
 
 ### `@Req()` and `Request`
 
@@ -521,6 +595,7 @@ import { Request, Response } from 'express';       // error with emitDecoratorMe
 ### Practice notes
 
 - — `@Req()` + `@Res()` in `AppController.fetchReq`
+- — `@Query('name')` + `@Query('age')` with `?` and `&` in `fetchQuery`
 
 ---
 
@@ -713,7 +788,9 @@ Add a row when you finish a unit.
 | Default provider scope? | Singleton. |
 | How does Nest know the route? | `@Controller('products')` + `@Get(':id')` → `GET /products/:id`. |
 | Missing product? | `NotFoundException` → 404. |
-| What is `@Req()`? | Raw Express `Request` (read incoming data). |
+| What is `@Query()`? | Reads `key=value` pairs after `?` in the URL. |
+| What do `?` and `&` mean? | `?` starts the query string (once). `&` separates the next pair. |
+| `@Param` vs `@Query`? | Param = path (`/42`). Query = optional `?name=Rajnish&age=25`. |
 | What is `@Res()`? | Raw Express `Response` (you send the reply). |
 | `@Req()` vs `@Param` / `@Query`? | Specific = one slice; `@Req()` = whole request. |
 | `@Res()` vs `return`? | `return` → Nest sends JSON. `@Res()` → you must `res.send` / `res.json`. |
@@ -738,7 +815,7 @@ Add a row when you finish a unit.
               │
     @Get @Post @Put @Patch @Delete
               │
-         @Param / @Body / @Req() / @Res()
+         @Param / @Query / @Body / @Req() / @Res()
               │
           Service methods
               │
