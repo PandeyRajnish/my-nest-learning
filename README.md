@@ -53,7 +53,7 @@ Official-ish Nest order. Request flows **top → bottom**.
   09 Interceptors (pre)  📝   wrap before handler (timing, map)
       │
       ▼
-  10 Pipes               📝   transform + validate input
+  10 Pipes               ✅   transform + validate input
       │
       ▼
   03 Controller          ✅   pick route, pull params
@@ -76,7 +76,7 @@ flowchart TB
   Req[HTTP request] --> MW[07 Middleware 📝]
   MW --> G[08 Guards 📝]
   G --> I1[09 Interceptors before 📝]
-  I1 --> P[10 Pipes 📝]
+  I1 --> P[10 Pipes ✅]
   P --> C[03 Controller ✅]
   C --> S[04 Service ✅]
   S --> I2[09 Interceptors after 📝]
@@ -97,7 +97,7 @@ flowchart TB
 | 07 | [Middleware](#07-middleware-) | 📝 |
 | 08 | [Guards](#08-guards-) | 📝 |
 | 09 | [Interceptors](#09-interceptors-) | 📝 |
-| 10 | [Pipes](#10-pipes-) | 📝 |
+| 10 | [Pipes](#10-pipes-) | ✅ |
 | 11 | [Exception filters](#11-exception-filters-) | 📝 |
 | 12 | [Custom providers / scope](#12-custom-providers--scope-) | 📝 |
 | — | [Interview Q&A](#interview-qa) | living |
@@ -125,7 +125,8 @@ const app = await NestFactory.create(AppModule); // bootstraps from the root mod
 
 ```
 AppModule
- ├── AppController / AppService
+ ├── AppController / AppService     →  built-in Parse* pipes
+ ├── AuthController                 →  /auth  (DTO + custom pipes)
  └── imports ProductsModule
         ├── ProductsController  →  /products
         └── ProductsService     →  in-memory Product[]
@@ -133,8 +134,13 @@ AppModule
 
 | File | Role |
 |------|------|
-| `src/main.ts` | Starts the HTTP server |
+| `src/main.ts` | Starts the HTTP server + **global** `ValidationPipe` |
 | `src/app.module.ts` | Root module |
+| `src/app.controller.ts` | Built-in param pipes (`ParseIntPipe`, …) |
+| `src/auth/auth.controller.ts` | `/auth` routes + `@UsePipes` |
+| `src/auth/auth.dto.ts` | DTO + `class-validator` / `class-transformer` |
+| `src/auth/customPipe/customPipe.ts` | Custom `PipeTransform` (value + metadata) |
+| `src/auth/customPipe/phoneAuth.ts` | Custom phone validation pipe |
 | `src/products/products.module.ts` | Feature module |
 | `src/products/products.controller.ts` | Routes for `/products` |
 | `src/products/products.service.ts` | CRUD logic |
@@ -217,7 +223,7 @@ getProduct(@Param('id') id: string) {}  // param
 | `@Redirect(...)` | Redirect. | 03 |
 | `@UseGuards(...)` | Auth / roles before handler. | 08 |
 | `@UseInterceptors(...)` | Wrap before/after handler. | 09 |
-| `@UsePipes(...)` | Transform + validate input. | 10 |
+| `@UsePipes(...)` * | Transform + validate input. | 10 |
 | `@UseFilters(...)` | Catch errors for class/method. | 11 |
 | `@Version('1')` | API versioning. | later |
 
@@ -859,32 +865,287 @@ throw new NotFoundException('Product not found'); // → 404
 
 ---
 
-## 10. Pipes — 📝
+## 10. Pipes — ✅
 
-**One-liner:** **Transform** and/or **validate** input *before* the handler runs (`ParseIntPipe`, `ValidationPipe`).
+**One-liner:** A pipe **transforms** and/or **validates** one handler argument *before* the method runs. Bad input → `BadRequestException` (400). Handler never sees garbage.
 
 **In the pipeline:** Interceptors (pre) → **Pipes** → Controller handler
 
-**Hook it with:** `@UsePipes(...)` or on a param: `@Param('id', ParseIntPipe)`. `implements PipeTransform`.
+**Why we need them:** HTTP is strings. `"/pipe/int/42"` is the text `"42"`, not a number. Bodies are plain JSON, not a `AuthDto` class. Without pipes you repeat `parseInt` / `if (!email)` in every controller.
 
-**Interview:** Pipes sit on arguments. Built-ins: `ParseIntPipe`, `ParseUUIDPipe`, `ValidationPipe` (DTO + `class-validator`). Throw `BadRequestException` on bad input.
+**When we use them:**
+- Path/query must be a number, bool, UUID, array → built-in `Parse*Pipe`
+- Body must match a DTO (`@IsEmail`, length, enum) → `ValidationPipe` + `class-validator`
+- Extra business rule (phone 10–11 digits, uppercase name, Date parse) → custom `PipeTransform`
 
-```ts
-// fill when you practice
-// @Get(':id')
-// getProduct(@Param('id', ParseIntPipe) id: number) { ... }
+**Interview:** Pipe = `PipeTransform.transform(value, metadata)`. Two jobs: **change the shape** and **reject invalid**. Nest built-ins + `ValidationPipe`. Throw `BadRequestException` on failure.
+
+```
+ HTTP string / JSON
+        │
+        ▼
+     Pipe  ── transform ──► number / Date / DTO instance
+        │
+        └── validate ──► throw 400  or  pass to handler
 ```
 
-**Visual:** (add after practice)
+```mermaid
+flowchart TB
+  HTTP["HTTP: strings + JSON"] --> Pipe
+  Pipe -->|ok| Handler["Controller handler"]
+  Pipe -->|invalid| BR["BadRequestException 400"]
+  Pipe --> T["transform: '42' → 42"]
+  Pipe --> V["validate: @IsEmail, phone regex"]
+```
+
+---
+
+### `PipeTransform` — `value` and `metadata`
+
+Every pipe implements:
+
+```ts
+export interface PipeTransform<T = any, R = any> {
+  transform(value: T, metadata: ArgumentMetadata): R;
+}
+```
+
+| Argument | What it is |
+|----------|------------|
+| **`value`** | The raw argument Nest extracted (`"42"`, `{ name, email }`, query string, …). You **return** the new value (or throw). |
+| **`metadata`** | *Where* that value came from and *what TypeScript type* the parameter has. |
+
+**`ArgumentMetadata`:**
+
+| Field | Meaning | This project |
+|-------|---------|--------------|
+| **`type`** | Which decorator: `'body'` \| `'query'` \| `'param'` \| `'custom'` | `CustomPipe`: `'body'` vs `'param'` |
+| **`data`** | The string you passed the decorator: `@Body('name')` → `'name'`; `@Param('id')` → `'id'`; `@Body()` (no key) → `undefined` | `metadata.data === 'name'` → `toUpperCase()` |
+| **`metatype`** | The TS type of the parameter (`String`, `Number`, `Date`, `AuthDto`, …). Needs `emitDecoratorMetadata`. | `metadata.metatype === Date` → parse date |
+
+```ts
+transform(value: any, metadata: ArgumentMetadata) {
+  // value    = what the client sent (for that argument)
+  // metadata = { type, metatype, data }
+  return value; // handler receives this
+}
+```
+
+**This project's `CustomPipe`** (`src/auth/customPipe/customPipe.ts`):
+
+```ts
+transform(value: any, metadata: ArgumentMetadata) {
+  if (metadata.metatype === Date) {           // TS type is Date
+    value = new Date(value);
+    if (isNaN(value.getTime())) throw new BadRequestException('Invalid date format');
+    value = value.toUTCString();
+  }
+  if (metadata.type === 'body' && metadata.data === 'name') { // @Body('name')
+    value = value.toUpperCase();
+  } else if (metadata.type === 'param') {     // @Param('id')
+    const idLength = parseInt(value, 10);
+    if (!isNaN(idLength) && idLength > 0) {
+      value = Math.floor(Math.random() * Math.pow(10, idLength));
+    }
+  }
+  return value;
+}
+```
+
+```mermaid
+flowchart TB
+  In["transform(value, metadata)"] --> Meta{metadata}
+  Meta -->|"metatype === Date"| DateParse["new Date(value) → toUTCString()"]
+  Meta -->|"type === 'body' and data === 'name'"| Upper["value.toUpperCase()"]
+  Meta -->|"type === 'param'"| Rand["parse length → random id"]
+  DateParse --> Out[return value]
+  Upper --> Out
+  Rand --> Out
+```
+
+**`PhoneAuth`** uses **`value`** (the whole body: `value.phone`) and logs **`metadata.metatype`**:
+
+```ts
+transform(value: any, metadata: ArgumentMetadata) {
+  if (!/^\d{10,11}$/.test(String(value.phone))) {
+    throw new BadRequestException('Phone number must be 10 or 11 digits');
+  }
+  return value;
+}
+```
+
+---
+
+### Pipe levels (narrow → wide)
+
+Same pipe idea; different **scope**.
+
+```
+ Parameter          only that argument
+    ▲
+ Route / method     every arg of that handler   @UsePipes on the method
+    ▲
+ Controller         every handler in the class  @UsePipes on the class
+    ▲
+ Global             every route in the app      app.useGlobalPipes()
+```
+
+```mermaid
+flowchart TB
+  subgraph scope["wider →"]
+    P["1. Parameter\n@Param('id', ParseIntPipe)"]
+    R["2. Route / method\n@UsePipes(PhoneAuth)"]
+    C["3. Controller\n@Controller + @UsePipes"]
+    G["4. Global\napp.useGlobalPipes(new ValidationPipe())"]
+  end
+  P --> R --> C --> G
+```
+
+| Level | How | Runs on | This project |
+|-------|-----|---------|--------------|
+| **1. Parameter** | Second arg of `@Param` / `@Query` / `@Body` | That one value | `AppController` `ParseIntPipe`, `ParseFloatPipe`, `ParseBoolPipe`, `ParseArrayPipe`, `ParseUUIDPipe` |
+| **2. Route / method** | `@UsePipes(...)` on the handler | All arguments of that method | `AuthController.registerUser`, `customPipe`, `getId` |
+| **3. Controller** | `@UsePipes(...)` on the class | Every route in that controller | *(not used yet — same decorator, on `@Controller`)* |
+| **4. Global** | `app.useGlobalPipes(...)` in `main.ts` | Entire app | `new ValidationPipe()` |
+
+**1 — Parameter** (`src/app.controller.ts`):
+
+```ts
+@Get('pipe/int/:id')
+getInt(@Param('id', ParseIntPipe) id: number) { ... }          // "42" → 42
+
+@Get('pipe/float/:id')
+getFloat(@Param('id', ParseFloatPipe) id: number) { ... }
+
+@Get('pipe/bool')
+getBool(@Query('isActive', ParseBoolPipe) isActive: boolean) { ... }
+
+@Get('pipe/array')
+getArray(@Query('num', new ParseArrayPipe({ items: Number })) num: number[]) { ... }
+
+@Get('/pipe/uuid/:id')
+getUuid(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) { ... }
+```
+
+**2 — Route** (`src/auth/auth.controller.ts`):
+
+```ts
+@Post('register')
+@UsePipes(PhoneAuth)   // class — Nest instantiates (@Injectable)
+registerUser(@Body() userData: AuthDto) { ... }
+
+@Post('custom-pipe')
+@UsePipes(new ValidationPipe(), new CustomPipe())  // instances, in order
+customPipe(@Body('name') name: string) { ... }
+
+@Get('/register/:id')
+@UsePipes(new CustomPipe())
+getId(@Param('id') id: number) { ... }
+```
+
+**3 — Controller** (pattern — add when you want every `/auth` route piped):
+
+```ts
+@Controller('auth')
+@UsePipes(new ValidationPipe())
+export class AuthController { ... }
+```
+
+**4 — Global** (`src/main.ts`):
+
+```ts
+app.useGlobalPipes(new ValidationPipe());
+```
+
+**Pass class vs `new`:** `@UsePipes(PhoneAuth)` → Nest constructs it (can inject deps). `@UsePipes(new CustomPipe())` → you construct it (pass options easily).
+
+Pipes on a method run **in order**: `@UsePipes(new ValidationPipe(), new CustomPipe())` → validate first, then `CustomPipe`.
+
+---
+
+### Built-in parse pipes (this project)
+
+| Pipe | Input → output | Example |
+|------|----------------|---------|
+| `ParseIntPipe` | `"42"` → `42` | `GET /pipe/int/42` |
+| `ParseFloatPipe` | `"3.14"` → `3.14` | `GET /pipe/float/3.14` |
+| `ParseBoolPipe` | `"true"` → `true` | `GET /pipe/bool?isActive=true` |
+| `ParseArrayPipe({ items: Number })` | `"1,2,3"` → `[1, 2, 3]` | `GET /pipe/array?num=1,2,3` |
+| `ParseUUIDPipe({ version: '4' })` | UUID string or 400 | `GET /pipe/uuid/<uuid-v4>` |
+| `ValidationPipe` | plain JSON → class instance + validate | global + `@UsePipes` on auth |
+
+---
+
+### `class-validator` and `class-transformer`
+
+**Why two packages:** JSON is a plain object. Decorators like `@IsEmail()` live on a **class**. Nest's `ValidationPipe` needs both:
+
+1. **`class-transformer`** — turn `{ name: "a" }` into `new AuthDto()` (and `@Type(() => Date)` for nested types).
+2. **`class-validator`** — run `@IsEmail()`, `@Length()`, `@IsEnum()`, … on that instance.
+
+```
+ JSON body
+    │
+    ▼
+ class-transformer   @Type(() => Date)  →  AuthDto instance
+    │
+    ▼
+ class-validator     @IsEmail @Length @IsEnum  →  400 or pass
+    │
+    ▼
+ handler(@Body() userData: AuthDto)
+```
+
+```mermaid
+flowchart LR
+  JSON["plain JSON"] --> CT["class-transformer"]
+  CT --> Inst["AuthDto instance"]
+  Inst --> CV["class-validator"]
+  CV -->|ok| Handler
+  CV -->|fail| Err["400 Bad Request"]
+```
+
+`ValidationPipe` is the Nest glue. Global in this app: `app.useGlobalPipes(new ValidationPipe())`.
+
+**`AuthDto`** (`src/auth/auth.dto.ts`) — validators you practiced:
+
+| Decorator | Meaning |
+|-----------|---------|
+| `@IsString()` | Must be a string |
+| `@Length(3, 20)` | Min 3, max 20 |
+| `@IsEmail()` | Valid email |
+| `@IsNotEmpty()` | Required |
+| `@IsAlphanumeric()` | Letters + digits |
+| `@MinLength(8)` / `@MaxLength(15)` | Custom `message` + `$constraint1` |
+| `@IsEnum(Country)` | Value must be in the enum |
+| `@IsDateString()` | ISO date **string** (`yyyy-mm-dd`) — no `@Type` needed |
+| `@IsDate()` | Real `Date` object — needs `@Type(() => Date)` because JSON dates are strings |
+| `@Type(() => Date)` | **class-transformer**: string → `Date` |
+| `@IsOptional()` | Skip other validators if missing |
+| `@IsNumber()` | Must be a number |
+| `@Matches(/regex/)` | Pattern (commented phone example) |
+
+**`@IsDate` vs `@IsDateString` (your comment in the DTO):**
+
+| | `@IsDate()` | `@IsDateString()` |
+|--|-------------|-------------------|
+| Expects | JavaScript `Date` | ISO string |
+| JSON body `"2020-01-01"` | Fail unless `@Type(() => Date)` | Pass |
+
+**Interview:** `ValidationPipe` = transform (class-transformer) + validate (class-validator). DTO holds the rules. Controller stays thin.
+
+---
 
 ### Practice notes
 
-- Date:
-- What I built:
-- Param pipe vs `@UsePipes` vs global `ValidationPipe`:
-- Gotcha:
+- Global `ValidationPipe` in `main.ts`
+- Parameter: `ParseIntPipe`, `ParseFloatPipe`, `ParseBoolPipe`, `ParseArrayPipe`, `ParseUUIDPipe` on `AppController`
+- Route: `@UsePipes(PhoneAuth)` / `new ValidationPipe(), new CustomPipe()`
+- `CustomPipe` branches on `metadata.metatype`, `metadata.type`, `metadata.data`
+- `AuthDto` + `class-validator` / `class-transformer`; `@IsDateString` vs `@Type(() => Date)`
 
 ---
+
 
 ## 11. Exception filters — 📝
 
@@ -959,7 +1220,13 @@ Add a row when you finish a unit.
 | Request pipeline order? | Middleware → Guards → Interceptors → Pipes → Controller → Interceptors → Filters (on error). |
 | Middleware vs Guard? | 📝 fill in unit 07/08 |
 | Guard vs Interceptor? | 📝 fill in unit 08/09 |
-| Pipe vs Interceptor? | 📝 fill in unit 09/10 |
+| What is a pipe? | Transform and/or validate a handler argument before the method runs. |
+| Why pipes? | HTTP is strings; pipes turn `"42"` into `42` and reject bad DTOs with 400. |
+| `PipeTransform`? | `transform(value, metadata)` — return the new value or throw. |
+| What is `value` vs `metadata`? | `value` = the input. `metadata` = `{ type, metatype, data }` (body/param/query, TS type, decorator key). |
+| Pipe levels? | Parameter `@Param('id', Pipe)` → method `@UsePipes` → controller `@UsePipes` → global `useGlobalPipes`. |
+| `class-validator` vs `class-transformer`? | Validator = `@IsEmail` rules. Transformer = plain JSON → class (`@Type(() => Date)`). `ValidationPipe` runs both. |
+| Pipe vs Interceptor? | Pipe = one argument, before handler. Interceptor = wrap whole call, before *and* after. |
 | Exception vs Exception filter? | Throw (06) vs shape the error response (11). 📝 |
 
 ---

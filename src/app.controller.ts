@@ -7,6 +7,11 @@ import {
   Query,
   Req,
   Res,
+  ParseIntPipe,
+  ParseFloatPipe,
+  ParseBoolPipe,
+  ParseArrayPipe,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
@@ -26,6 +31,33 @@ export class AppController {
   //     </script>
   //     `);
   // }
+
+  // GET /pipe/int/42
+  @Get('pipe/int/:id')
+  getInt(@Param('id', ParseIntPipe) id: number) {
+    return { pipe: 'ParseIntPipe', id, type: typeof id };
+  }
+  // GET /pipe/float/3.14
+  @Get('pipe/float/:id')
+  getFloat(@Param('id', ParseFloatPipe) id: number) {
+    return { pipe: 'ParseFloatPipe', id, type: typeof id };
+  }
+  // GET /pipe/bool?isActive=true
+  @Get('pipe/bool')
+  getBool(@Query('isActive', ParseBoolPipe) isActive: boolean) {
+    return { pipe: 'ParseBoolPipe', isActive };
+  }
+  // GET /pipe/array?num=1,2,3
+  @Get('pipe/array')
+  getArray(@Query('num', new ParseArrayPipe({ items: Number })) num: number[]) {
+    return { pipe: 'ParseArrayPipe', num };
+  }
+
+  // /pipe/uuid/550e8400-e29b-41d4-a716-446655440000
+  @Get('/pipe/uuid/:id')
+  getUuid(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    return `Id received: ${id}`;
+  }
 
   @Get(':id')
   fetchQuery(
